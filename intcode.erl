@@ -22,7 +22,8 @@
           ic=0, % instruction counter
           modeA=undef, % memory access mode for 1st param of current instruction
           modeB=undef, % memory access mode for 2nd param of current instruction
-          interface=none % process that this computer will talk to for I/O operations
+          input=undef, % process that will receive output of the program
+          output=undef
          }).
 
 %%%%%%%%%%%%%%%%%%
@@ -39,7 +40,10 @@ register_set(Mem, Addr, NewValue) ->
 fetch_mem(Mem, Address, ?DIRECT_ACCESS)  -> register_at(Mem, Address);
 fetch_mem(Mem ,Address, ?POINTER_ACCESS) -> register_at(Mem, register_at(Mem,Address)).
 
-fetch_instruction(State) when State#computer.ic >= length(State#computer.mem) -> eof;
+fetch_instruction(State) when State#computer.ic >= length(State#computer.mem) ->
+    % inform output that we reached the end of the program
+    State#computer.output ! eof;
+
 fetch_instruction(State) ->
 
     Memory = State#computer.mem,
@@ -49,7 +53,7 @@ fetch_instruction(State) ->
     NewState = State#computer{modeA=ModeA, modeB=ModeB},
 
     case OPCode of
-        99 -> halted;
+        99 -> State#computer.output ! halted;
          1 -> add(NewState);
          2 -> mult(NewState);
          3 -> input(NewState);
@@ -113,32 +117,57 @@ input(State) ->
     IC = State#computer.ic,
     Dst = fetch_mem(Mem, IC +1, ?DIRECT_ACCESS),
 
-    case io:fread("$ ","~d") of
-        {ok, [N]} -> NewMem = register_set(Mem, Dst, N),
-                     fetch_instruction(State#computer{mem=NewMem, ic=IC+2})
+    State#computer.input ! awaiting_input,
+
+    receive
+        N -> NewMem = register_set(Mem, Dst, N),
+             fetch_instruction(State#computer{mem=NewMem, ic=IC+2})
     end.
 
 output(State) ->
     Mem = State#computer.mem,
     IC = State#computer.ic,
-    io:format("~p~n", [fetch_mem(Mem, IC+1, State#computer.modeA)]),
+    State#computer.output ! fetch_mem(Mem, IC+1, State#computer.modeA),
     fetch_instruction(State#computer{ic = IC+2}).
 
 %%%%%%%%%%%%%%%%%%%
 % Running intcode %
 %%%%%%%%%%%%%%%%%%%
-run_file(FileName) ->
+
+run_file(FileName, Input, Output) ->
     {ok, FileContents} = file:read_file(FileName),
     SourceCode= string:trim(binary_to_list(FileContents)),
-    run(SourceCode).
+    run(SourceCode, Input, Output).
 
-run(SourceCode) ->
+run(SourceCode, Input, Output) ->
     Instructions = [ list_to_integer(X) || X <- string:split(SourceCode, ",", all)],
-    Program = #computer{mem = Instructions},
-    fetch_instruction(Program).
+    Program = #computer{mem = Instructions, input=Input, output=Output},
+    spawn(intcode, fetch_instruction,[Program]).
+
+% Interactive shell
+shell(IntcodeMachine) when is_pid(IntcodeMachine)->
+    receive
+        awaiting_input ->
+            case io:fread("[o_o] input? ","~d") of
+                {ok, [N]} -> IntcodeMachine ! N,
+                             shell(IntcodeMachine)
+            end;
+        N when is_integer(N) -> io:format("[^_^] intcode says: ~p~n",[N]),
+               shell(IntcodeMachine);
+        halted -> io:format("[-_-] intcode halted~n");
+        eof    -> io:format("[x_x] intcode eof~n")
+    end.
+
+shell_load(FileName) ->
+    IntcodeMachine = run_file(FileName, self(), self()),
+    shell(IntcodeMachine).
+
+shell_run(SourceCode) ->
+    IntcodeMachine = run(SourceCode, self(), self()),
+    shell(IntcodeMachine).
 
 %%%%%%%%%
 % Tests %
 %%%%%%%%%
 test() ->
-    run("3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99").
+    shell_run("3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99").
