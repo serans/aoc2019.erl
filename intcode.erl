@@ -22,8 +22,10 @@
           ic=0, % instruction counter
           modeA=undef, % memory access mode for 1st param of current instruction
           modeB=undef, % memory access mode for 2nd param of current instruction
-          input=undef, % process that will receive output of the program
-          output=undef
+          input=undef, % we'll ping this process when we need input
+                       % not striclty needed but useful for interactive sessions.
+          output=undef % process that will receive output of the program
+
          }).
 
 %%%%%%%%%%%%%%%%%%
@@ -112,12 +114,17 @@ jump_if(State, JumpTest) ->
        false -> fetch_instruction(State#computer{ic = IC+3})
     end.
 
-input(State) ->
+input(State) when is_pid(State#computer.input) ->
+    % If we have a process set as Input, then notify we're waiting for input
+    State#computer.input ! awaiting_input,
+    receive_input(State);
+
+input(State) -> receive_input(State).
+
+receive_input(State) ->
     Mem = State#computer.mem,
     IC = State#computer.ic,
     Dst = fetch_mem(Mem, IC +1, ?DIRECT_ACCESS),
-
-    State#computer.input ! awaiting_input,
 
     receive
         N -> NewMem = register_set(Mem, Dst, N),
@@ -134,12 +141,12 @@ output(State) ->
 % Running intcode %
 %%%%%%%%%%%%%%%%%%%
 
-run_file(FileName, Input, Output) ->
+run_file(FileName, Output, Input) ->
     {ok, FileContents} = file:read_file(FileName),
     SourceCode= string:trim(binary_to_list(FileContents)),
-    run(SourceCode, Input, Output).
+    run(SourceCode, Output, Input).
 
-run(SourceCode, Input, Output) ->
+run(SourceCode, Output, Input) ->
     Instructions = [ list_to_integer(X) || X <- string:split(SourceCode, ",", all)],
     Program = #computer{mem = Instructions, input=Input, output=Output},
     spawn(intcode, fetch_instruction,[Program]).
