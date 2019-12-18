@@ -8,7 +8,13 @@
 % Chain Amplificators %
 %%%%%%%%%%%%%%%%%%%%%%%
 
-wait_for_halt(N) -> receive halted -> N end.
+feedback(LastValue, InputAmp) ->
+    receive
+        halted   -> LastValue;
+
+        NewValue -> InputAmp ! NewValue,
+                    feedback(NewValue, InputAmp)
+    end.
 
 chain_amps(Phases) -> chain_amps(none, Phases).
 
@@ -24,7 +30,7 @@ chain_amps(PrevAmp, [Phase | Rest]) ->
 
 chain_amps(InputAmp, []) ->
     InputAmp ! ?AMP_CHAIN_INPUT,
-    receive N -> wait_for_halt(N) end.
+    feedback(no_output, InputAmp).
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%
 % Find best configuration %
@@ -32,5 +38,8 @@ chain_amps(InputAmp, []) ->
 perms([]) -> [[]];
 perms(L) -> [[H|T] || H <- L, T <- perms(L--[H])].
 
-solve() ->
+problem1() ->
     lists:max( lists:map(fun(X) -> chain_amps(X) end, perms([0,1,2,3,4]))).
+
+problem2() ->
+    lists:max( lists:map(fun(X) -> chain_amps(X) end, perms([5,6,7,8,9]))).
