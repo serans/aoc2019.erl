@@ -65,12 +65,12 @@ read_orbits(Input, Orbits) ->
 % PROBLEMS %
 %%%%%%%%%%%%
 problem1() ->
-    {ok, Input} = file:open("day6.input", [read]),
+    {ok, Input} = file:open("input/day6.txt", [read]),
     Orbits = read_orbits(Input, #{}),
     orbits_length(Orbits).
 
 problem2() ->
-    {ok, Input} = file:open("day6.input", [read]),
+    {ok, Input} = file:open("input/day6.txt", [read]),
     Orbits = read_orbits(Input, #{}),
     search_transfer(Orbits, "YOU","SAN").
 

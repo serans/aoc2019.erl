@@ -3,7 +3,7 @@
 
 -define(AMP_CHAIN_INPUT,0).
 -define(AMP_COUNT, 5).
--define(INPUT_FILE, "day7.input").
+-define(INPUT_FILE, "input/day7.txt").
 %%%%%%%%%%%%%%%%%%%%%%%
 % Chain Amplificators %
 %%%%%%%%%%%%%%%%%%%%%%%

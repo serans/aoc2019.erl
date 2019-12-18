@@ -51,10 +51,10 @@ run(Program) -> fetch_instruction(Program, 0).
 %%%%%%%%%%%%
 
 % Problem 1, just run the intcode
-problem1() -> run(load('day2.input')).
+problem1() -> run(load('input/day2.txt')).
 
 % Problem 2, search which instructions produce a given result
-problem2() -> problem2(load('day2.input'),0).
+problem2() -> problem2(load('input/day2.txt'),0).
 
 problem2(_      , Number) when Number > 9999 -> undefined;
 problem2(Program, Number) ->

@@ -20,4 +20,4 @@ solve(FileName) ->
     calculate_fuel(Input,0).
 
 problem1() ->
-    solve('day1.input').
+    solve('input/day1.txt').
