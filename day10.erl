@@ -121,6 +121,7 @@ problem2() ->
 
     % Group asteroids by angle to base, sorted by distance
     LineOfSight = line_of_sight(Base, Asteroids),
-%    lists:nth(200, [ cartesian(X, Base) || X <- vaporize(LineOfSight) ]).
+
+    % 200th vaporized meteorite
     cartesian(lists:nth(200, vaporize(LineOfSight)), Base).
 
