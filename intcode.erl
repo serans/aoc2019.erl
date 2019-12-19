@@ -1,25 +1,10 @@
 -module(intcode).
 -compile(export_all).
 
-% Will run on the Intcode computer (day2)
-% new OPcode:
-%   3,X -> reads into X
-%   4,X -> outputs $X
-%
-% add Parameter mode:
-%   0 -> position mode (as used in day2)
-%   1 -> immediate mode (params as values)
-%
-% INSTRUCTIONS: ABCDE
-%   DE - OPCODE
-%   C,B,A - mode of 1st, 2nd, 3rd parameters
-
-% Decode the instruction in the IC (Instruction Counter) and sends
-% it to execution
-
 -record(computer, {
           mem=[], %memory of the computer (list of integers)
           ic=0, % instruction counter
+          base=0, % base for relative mode memory access
           modeA=undef, % memory access mode for 1st param of current instruction
           modeB=undef, % memory access mode for 2nd param of current instruction
           input=undef, % we'll ping this process when we need input
@@ -28,29 +13,54 @@
 
          }).
 
-%%%%%%%%%%%%%%%%%%
-% Fetch / Decode %
-%%%%%%%%%%%%%%%%%%
+%%%%%%%%%%%%%%%%%
+% Memory Access %
+%%%%%%%%%%%%%%%%%
+
+-define(RELATIVE_ACCESS, 2).
 -define(DIRECT_ACCESS, 1).
 -define(POINTER_ACCESS, 0).
 
 % register operations (note that erlang is 1-indexed)
-register_at(Mem, Addr) -> lists:nth(Addr + 1, Mem).
-register_set(Mem, Addr, NewValue) ->
-    lists:sublist(Mem, 1, Addr) ++ [NewValue] ++ lists:nthtail(Addr+1, Mem).
 
-fetch_mem(Mem, Address, ?DIRECT_ACCESS)  -> register_at(Mem, Address);
-fetch_mem(Mem ,Address, ?POINTER_ACCESS) -> register_at(Mem, register_at(Mem,Address)).
+register_at(Mem, Addr) when Addr >= length(Mem) -> 0;
+register_at(Mem, Addr) -> lists:nth(Addr + 1, Mem).
+
+register_set(Mem, Addr, NewValue) ->
+    NewMem = allocate_mem(Mem, Addr),
+    lists:sublist(NewMem, 1, Addr) ++ [NewValue] ++ lists:nthtail(Addr+1, NewMem).
+
+% It is possible to address a memory position which has not been initialized,
+% in that case we expand the memory with zeros.
+allocate_mem(Mem, Addr) when Addr >= length(Mem) ->
+    Mem ++ [ 0 || _ <- lists:seq(0, Addr - length(Mem)) ];
+allocate_mem(Mem, _) -> Mem.
+
+fetch_mem(Status, Address, ?DIRECT_ACCESS) ->
+    register_at(Status#computer.mem, Address);
+
+fetch_mem(Status, Address, ?POINTER_ACCESS) ->
+    Mem = Status#computer.mem,
+    Pointer = register_at(Mem,Address),
+    register_at(Mem, Pointer);
+
+fetch_mem(Status, Address, ?RELATIVE_ACCESS) ->
+    Mem = Status#computer.mem,
+    Offset = register_at(Mem, Address),
+    register_at(Mem, Offset + Status#computer.base).
+
+%%%%%%%%%%%%%%%%%%
+% Fetch / Decode %
+%%%%%%%%%%%%%%%%%%
 
 fetch_instruction(State) when State#computer.ic >= length(State#computer.mem) ->
-    % inform output that we reached the end of the program
+    % inform output that we have reached the end of the program
     State#computer.output ! eof;
 
 fetch_instruction(State) ->
 
-    Memory = State#computer.mem,
     IC = State#computer.ic,
-    {OPCode,ModeA,ModeB} = decode(fetch_mem(Memory, IC, ?DIRECT_ACCESS)),
+    {OPCode,ModeA,ModeB} = decode(fetch_mem(State, IC, ?DIRECT_ACCESS)),
 
     NewState = State#computer{modeA=ModeA, modeB=ModeB},
 
@@ -63,13 +73,15 @@ fetch_instruction(State) ->
          5 -> jnz(NewState);
          6 -> jz(NewState);
          7 -> less_than(NewState);
-         8 -> equals(NewState)
+         8 -> equals(NewState);
+         9 -> base(NewState)
     end.
 
 decode(OP) ->
     OPCode = OP rem 100,
     ModeA  = (OP div 100) rem 10,
     ModeB  = (OP div 1000) rem 10,
+%    io:format("<<~p|~p(~p,~p)>>",[OP, OPCode, ModeA, ModeB]),
     {OPCode, ModeA, ModeB}.
 
 %%%%%%%%%%%%%
@@ -91,12 +103,12 @@ equals(State) -> alu(State, fun(X,Y) ->
     end).
 
 alu(State, Function) ->
-    Mem = State#computer.mem,
     IC  = State#computer.ic,
-    Op1 = fetch_mem(Mem, IC+1, State#computer.modeA),
-    Op2 = fetch_mem(Mem, IC+2, State#computer.modeB),
-    Dst = fetch_mem(Mem, IC+3, ?DIRECT_ACCESS),
+    Op1 = fetch_mem(State, IC+1, State#computer.modeA),
+    Op2 = fetch_mem(State, IC+2, State#computer.modeB),
+    Dst = fetch_mem(State, IC+3, ?DIRECT_ACCESS),
 
+    Mem = State#computer.mem,
     UpdatedMem = register_set(Mem, Dst, Function(Op1, Op2)),
     fetch_instruction(State#computer{mem = UpdatedMem, ic=IC+4}).
 
@@ -104,15 +116,20 @@ jnz(State) -> jump_if(State, fun(X) -> X =/= 0 end).
 jz(State)  -> jump_if(State, fun(X) -> X =:= 0 end).
 
 jump_if(State, JumpTest) ->
-    Mem = State#computer.mem,
     IC = State#computer.ic,
-    Op1 = fetch_mem(Mem, IC+1, State#computer.modeA),
-    JumpDst = fetch_mem(Mem, IC+2, State#computer.modeB),
+    Op1 = fetch_mem(State, IC+1, State#computer.modeA),
+    JumpDst = fetch_mem(State, IC+2, State#computer.modeB),
 
     case JumpTest(Op1) of
        true -> fetch_instruction(State#computer{ic = JumpDst});
        false -> fetch_instruction(State#computer{ic = IC+3})
     end.
+
+base(State) ->
+    IC = State#computer.ic,
+    Base = fetch_mem(State, IC+1, State#computer.modeA),
+
+    fetch_instruction(State#computer{ic=IC+2, base=Base}).
 
 input(State) when is_pid(State#computer.input) ->
     % If we have a process set as Input, then notify we're waiting for input
@@ -124,7 +141,7 @@ input(State) -> receive_input(State).
 receive_input(State) ->
     Mem = State#computer.mem,
     IC = State#computer.ic,
-    Dst = fetch_mem(Mem, IC +1, ?DIRECT_ACCESS),
+    Dst = fetch_mem(State, IC +1, State#computer.modeA),%?DIRECT_ACCESS),
 
     receive
         N -> NewMem = register_set(Mem, Dst, N),
@@ -132,9 +149,8 @@ receive_input(State) ->
     end.
 
 output(State) ->
-    Mem = State#computer.mem,
     IC = State#computer.ic,
-    State#computer.output ! fetch_mem(Mem, IC+1, State#computer.modeA),
+    State#computer.output ! fetch_mem(State, IC+1, State#computer.modeA),
     fetch_instruction(State#computer{ic = IC+2}).
 
 %%%%%%%%%%%%%%%%%%%
