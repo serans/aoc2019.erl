@@ -1,4 +1,19 @@
 -module(day9).
+-compile(export_all).
 
-problem1() ->
-    intcode:shell_load("input/day9.txt").
+readout() ->
+    receive
+        halted -> ok;
+        N -> io:format("~p~n",[N]), readout()
+    end.
+
+solve() ->
+    io:format("Problem I~n"),
+    Problem1 = intcode:load("input/day9.txt"),
+    Problem1 ! 1,
+    readout(),
+
+    io:format("Problem I~n"),
+    Problem2 = intcode:load("input/day9.txt"),
+    Problem2 ! 2,
+    readout().

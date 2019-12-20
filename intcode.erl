@@ -7,6 +7,7 @@
           base=0, % base for relative mode memory access
           modeA=undef, % memory access mode for 1st param of current instruction
           modeB=undef, % memory access mode for 2nd param of current instruction
+          modeC=undef, % memory access mode for 3rd param of current instruction
           input=undef, % we'll ping this process when we need input
                        % not striclty needed but useful for interactive sessions.
           output=undef % process that will receive output of the program
@@ -36,18 +37,26 @@ allocate_mem(Mem, Addr) when Addr >= length(Mem) ->
     Mem ++ [ 0 || _ <- lists:seq(0, Addr - length(Mem)) ];
 allocate_mem(Mem, _) -> Mem.
 
-fetch_mem(Status, Address, ?DIRECT_ACCESS) ->
-    register_at(Status#computer.mem, Address);
+set_mem(State, Address, Mode, Value) ->
+    Offset = if Mode =:= ?RELATIVE_ACCESS -> State#computer.base;
+                Mode =:= ?POINTER_ACCESS  -> 0
+             end,
+    Mem = State#computer.mem,
+    ResolvedAddress = register_at(Mem, Address) + Offset,
+    register_set(Mem, ResolvedAddress, Value).
 
-fetch_mem(Status, Address, ?POINTER_ACCESS) ->
-    Mem = Status#computer.mem,
-    Pointer = register_at(Mem,Address),
-    register_at(Mem, Pointer);
+fetch_mem(State, Address, ?DIRECT_ACCESS) ->
+    register_at(State#computer.mem, Address);
 
-fetch_mem(Status, Address, ?RELATIVE_ACCESS) ->
-    Mem = Status#computer.mem,
-    Offset = register_at(Mem, Address),
-    register_at(Mem, Offset + Status#computer.base).
+fetch_mem(State, Address, ?POINTER_ACCESS) ->
+    Mem = State#computer.mem,
+    ResolvedAddress = register_at(Mem,Address),
+    register_at(Mem, ResolvedAddress);
+
+fetch_mem(State, Address, ?RELATIVE_ACCESS) ->
+    Mem = State#computer.mem,
+    ResolvedAddress  = register_at(Mem, Address) + State#computer.base,
+    register_at(Mem, ResolvedAddress).
 
 %%%%%%%%%%%%%%%%%%
 % Fetch / Decode %
@@ -60,9 +69,9 @@ fetch_instruction(State) when State#computer.ic >= length(State#computer.mem) ->
 fetch_instruction(State) ->
 
     IC = State#computer.ic,
-    {OPCode,ModeA,ModeB} = decode(fetch_mem(State, IC, ?DIRECT_ACCESS)),
+    {OPCode,ModeA,ModeB,ModeC} = decode(fetch_mem(State, IC, ?DIRECT_ACCESS)),
 
-    NewState = State#computer{modeA=ModeA, modeB=ModeB},
+    NewState = State#computer{modeA=ModeA, modeB=ModeB, modeC=ModeC},
 
     case OPCode of
         99 -> State#computer.output ! halted;
@@ -81,8 +90,8 @@ decode(OP) ->
     OPCode = OP rem 100,
     ModeA  = (OP div 100) rem 10,
     ModeB  = (OP div 1000) rem 10,
-%    io:format("<<~p|~p(~p,~p)>>",[OP, OPCode, ModeA, ModeB]),
-    {OPCode, ModeA, ModeB}.
+    ModeC  = (OP div 10000) rem 10,
+    {OPCode, ModeA, ModeB, ModeC}.
 
 %%%%%%%%%%%%%
 % Execution %
@@ -106,10 +115,8 @@ alu(State, Function) ->
     IC  = State#computer.ic,
     Op1 = fetch_mem(State, IC+1, State#computer.modeA),
     Op2 = fetch_mem(State, IC+2, State#computer.modeB),
-    Dst = fetch_mem(State, IC+3, ?DIRECT_ACCESS),
 
-    Mem = State#computer.mem,
-    UpdatedMem = register_set(Mem, Dst, Function(Op1, Op2)),
+    UpdatedMem = set_mem(State, IC+3, State#computer.modeC, Function(Op1, Op2)),
     fetch_instruction(State#computer{mem = UpdatedMem, ic=IC+4}).
 
 jnz(State) -> jump_if(State, fun(X) -> X =/= 0 end).
@@ -127,9 +134,10 @@ jump_if(State, JumpTest) ->
 
 base(State) ->
     IC = State#computer.ic,
-    Base = fetch_mem(State, IC+1, State#computer.modeA),
+    CurrentBase = State#computer.base,
+    BaseOffset = fetch_mem(State, IC+1, State#computer.modeA),
 
-    fetch_instruction(State#computer{ic=IC+2, base=Base}).
+    fetch_instruction(State#computer{ic=IC+2, base=CurrentBase+BaseOffset}).
 
 input(State) when is_pid(State#computer.input) ->
     % If we have a process set as Input, then notify we're waiting for input
@@ -139,12 +147,10 @@ input(State) when is_pid(State#computer.input) ->
 input(State) -> receive_input(State).
 
 receive_input(State) ->
-    Mem = State#computer.mem,
     IC = State#computer.ic,
-    Dst = fetch_mem(State, IC +1, State#computer.modeA),%?DIRECT_ACCESS),
 
     receive
-        N -> NewMem = register_set(Mem, Dst, N),
+        N -> NewMem = set_mem(State, IC+1, State#computer.modeA, N),
              fetch_instruction(State#computer{mem=NewMem, ic=IC+2})
     end.
 
@@ -157,7 +163,7 @@ output(State) ->
 % Running intcode %
 %%%%%%%%%%%%%%%%%%%
 
-run_file(FileName, Output, Input) ->
+load(FileName, Output, Input) ->
     {ok, FileContents} = file:read_file(FileName),
     SourceCode= string:trim(binary_to_list(FileContents)),
     run(SourceCode, Output, Input).
@@ -166,6 +172,9 @@ run(SourceCode, Output, Input) ->
     Instructions = [ list_to_integer(X) || X <- string:split(SourceCode, ",", all)],
     Program = #computer{mem = Instructions, input=Input, output=Output},
     spawn(intcode, fetch_instruction,[Program]).
+
+run(FileName) -> run(FileName, self(), self()).
+load(SourceCode) -> load(SourceCode, self(), self()).
 
 % Interactive shell
 shell(IntcodeMachine) when is_pid(IntcodeMachine)->
@@ -182,15 +191,44 @@ shell(IntcodeMachine) when is_pid(IntcodeMachine)->
     end.
 
 shell_load(FileName) ->
-    IntcodeMachine = run_file(FileName, self(), self()),
+    IntcodeMachine = load(FileName),
     shell(IntcodeMachine).
 
 shell_run(SourceCode) ->
-    IntcodeMachine = run(SourceCode, self(), self()),
+    IntcodeMachine = run(SourceCode),
     shell(IntcodeMachine).
 
 %%%%%%%%%
 % Tests %
 %%%%%%%%%
+
+expect([]) -> ok;
+expect([Expected|Rest]) ->
+    receive
+        Expected -> expect(Rest)
+    end.
+
 test() ->
-    shell_run("3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99").
+
+    io:format("1) returns 999, 1000 or 1001 if INPUT is respectively < 8, ==8, >8~n"),
+    Src1 = "3,21,1008,21,8,20,1005,20,22,107,8,21,20,1006,20,31,1106,0,36,98,0,0,1002,21,125,20,4,20,1105,1,46,104,999,1105,1,46,1101,1000,1,20,4,20,1105,1,46,98,99",
+    shell_default:flush(),
+
+    P0 = run(Src1), P0 ! 7,
+    expect([awaiting_input, 999, halted]),
+    P1 = run(Src1), P1 ! 8,
+    expect([awaiting_input,1000, halted]),
+    P2 = run(Src1), P2 ! 9,
+    expect([awaiting_input,1001, halted]),
+
+
+
+    io:format("2) returns 1219070632396864~n"),
+    run("1102,34915192,34915192,7,4,7,99,0"), expect([1219070632396864, halted]),
+
+    io:format("3) Quine\n"),
+    Quine="109,1,204,-1,1001,100,1,100,1008,100,16,101,1006,101,0,99",
+    run(Quine),
+    expect([109,1,204,-1,1001,100,1,100,1008,100,16,101,1006,101,0,99, halted]),
+
+    all_ok.
