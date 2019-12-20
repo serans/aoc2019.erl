@@ -23,7 +23,10 @@
 % State Control %
 %%%%%%%%%%%%%%%%%
 
--record(path, { hist=[{0,0,?BLACK}], direction=?UP}).
+%-record(path, { hist=[{0,0,?BLACK}], direction=?UP}).
+
+% In problem 2 we start with a WHITE panel
+-record(path, { hist=[{0,0,?WHITE}], direction=?UP}).
 
 rotate(State, Sense) ->
     NDirection = mod(State#path.direction + Sense, 4),
@@ -59,6 +62,10 @@ mod(X,Y)->(X rem Y + Y) rem Y.
 %%%%%%%%%
 % Robot %
 %%%%%%%%%
+
+robot(Computer) ->
+    robot_read_color(#path{}, Computer).
+
 robot_read_color(State, Computer) ->
     receive
         awaiting_input -> Computer ! current_colour(State),
@@ -88,19 +95,29 @@ robot_rotate(State, Computer) ->
 % Problem I %
 %%%%%%%%%%%%%
 
-p() ->
-    Computer = intcode:load("input/day11.txt"),
-    robot_read_color(#path{}, Computer).
+visited_cells({X,Y,Colour}, Visited) ->
+    case maps:find({X,Y}, Visited) of
+        {ok, _ } -> Visited;
+        error -> maps:put({X,Y}, Colour, Visited)
+    end.
 
 problem1() ->
     Computer = intcode:load("input/day11.txt"),
-    {ok, FinalState} = robot_read_color(#path{}, Computer),
+    {ok, FinalState} = robot(Computer),
 
-    VisitedCells = fun({X,Y,Colour}, Visited) ->
-        case maps:find({X,Y}, Visited) of
-            {ok, _ } -> Visited;
-            error -> maps:put({X,Y}, Colour, Visited)
-        end
-    end,
+    VisitedCells = fun(A,B) -> visited_cells(A,B) end,
 
-    lists:foldl(VisitedCells, #{}, FinalState#path.hist).
+    Path = lists:foldl(VisitedCells, #{}, FinalState#path.hist),
+    length(maps:keys(Path)).
+
+order({X0,Y0,_},{X1,Y1,_}) ->
+    if X0 < X1 -> true;
+       X0 > X1 -> false;
+       Y0 < Y1 -> true
+    end.
+
+problem2() ->
+    Computer = intcode:load("input/day11.txt"),
+    {ok, FinalState} = robot(Computer),
+
+    FinalState.
