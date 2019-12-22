@@ -130,8 +130,8 @@ problem2() ->
 
     lists:foreach(
       fun(N) ->
-        X = mod(N, Width),
-        Y = N div Width,
+        X = mod(N, Width) - X0,
+        Y = N div Width   - Y0,
         Pos = case maps:find({X,Y}, Path) of
                   {ok, 0} -> 32;
                   {ok, 1} -> 35;
