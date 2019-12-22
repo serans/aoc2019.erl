@@ -108,13 +108,13 @@ problem1() ->
     Path = lists:foldl(fun visited_cells/2, #{}, FinalState#path.hist),
     length(maps:keys(Path)).
 
-pmin({X0,Y0} , {X1, Y1}) -> {min(X0,X1), min(Y0,Y1)}.
-pmax({X0,Y0} , {X1, Y1}) -> {max(X0,X1), max(Y0,Y1)}.
-corners(Point, {UpperLeft, BottomRight}) -> {pmin(Point, UpperLeft), pmax(Point, BottomRight)}.
-
 %%%%%%%%%%%%%%
 % Problem II %
 %%%%%%%%%%%%%%
+
+pmin({X0,Y0} , {X1, Y1}) -> {min(X0,X1), min(Y0,Y1)}.
+pmax({X0,Y0} , {X1, Y1}) -> {max(X0,X1), max(Y0,Y1)}.
+corners(Point, {UpperLeft, BottomRight}) -> {pmin(Point, UpperLeft), pmax(Point, BottomRight)}.
 
 problem2() ->
     Computer = intcode:load("input/day11.txt"),
