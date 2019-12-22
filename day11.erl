@@ -23,9 +23,9 @@
 % State Control %
 %%%%%%%%%%%%%%%%%
 
-%-record(path, { hist=[{0,0,?BLACK}], direction=?UP}).
 
 % In problem 2 we start with a WHITE panel
+%-record(path, { hist=[{0,0,?BLACK}], direction=?UP}).
 -record(path, { hist=[{0,0,?WHITE}], direction=?UP}).
 
 rotate(State, Sense) ->
@@ -105,19 +105,44 @@ problem1() ->
     Computer = intcode:load("input/day11.txt"),
     {ok, FinalState} = robot(Computer),
 
-    VisitedCells = fun(A,B) -> visited_cells(A,B) end,
-
-    Path = lists:foldl(VisitedCells, #{}, FinalState#path.hist),
+    Path = lists:foldl(fun visited_cells/2, #{}, FinalState#path.hist),
     length(maps:keys(Path)).
 
-order({X0,Y0,_},{X1,Y1,_}) ->
-    if X0 < X1 -> true;
-       X0 > X1 -> false;
-       Y0 < Y1 -> true
-    end.
+pmin({X0,Y0} , {X1, Y1}) -> {min(X0,X1), min(Y0,Y1)}.
+pmax({X0,Y0} , {X1, Y1}) -> {max(X0,X1), max(Y0,Y1)}.
+corners(Point, {UpperLeft, BottomRight}) -> {pmin(Point, UpperLeft), pmax(Point, BottomRight)}.
+
+%%%%%%%%%%%%%%
+% Problem II %
+%%%%%%%%%%%%%%
 
 problem2() ->
     Computer = intcode:load("input/day11.txt"),
     {ok, FinalState} = robot(Computer),
 
-    FinalState.
+    Path = lists:foldl(fun visited_cells/2, #{}, FinalState#path.hist),
+
+    PointsInPath = maps:keys(Path),
+
+    {{X0,Y0},{X1,Y1}} = lists:foldl(fun corners/2, {{0,0},{0,0}}, PointsInPath),
+
+    {Width, Height} = {X1-X0, Y1-Y0},
+
+    lists:foreach(
+      fun(N) ->
+        X = mod(N, Width),
+        Y = N div Width,
+        Pos = case maps:find({X,Y}, Path) of
+                  {ok, 0} -> 32;
+                  {ok, 1} -> 35;
+                  error   -> 32
+              end,
+        LastInRow = X1-1,
+        case X of
+            LastInRow -> io:format("~c~n",[Pos]);
+            _         -> io:format("~c",[Pos])
+        end
+      end,
+      lists:seq(0,(Width+1)*(Height+1))
+    ).
+
